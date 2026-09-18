@@ -1,0 +1,53 @@
+output:
+  width: 1080
+  height: 1920
+  preview_seconds: 10
+  preview_video_bitrate: 1800k
+  final_crf: 18
+  audio_bitrate: 192k
+  prefer_hardware: true
+
+subtitle:
+  timing_mode: weighted
+  enable_three_line_scroll: true
+  transition_seconds: 0.20
+  max_chars_per_line: 14
+  font: Microsoft YaHei UI
+  font_size: 60
+  outline: 7
+  shadow: 2
+  normal_color: "#FFFFFF"
+  current_color: "#FF4057"
+  previous_opacity: 0.72
+  next_opacity: 0.90
+  center_x: 465
+  previous_y: 1050
+  current_y: 1195
+  next_y: 1340
+  line_spacing: 145
+
+decorations:
+  title: ""
+  subtitle: ""
+  title_enabled: false
+  title_font: Microsoft YaHei UI
+  title_size: 72
+  title_y: 500
+  subtitle_size: 36
+  subtitle_y: 610
+  title_normal_color: "#FFFFFF"
+  title_accent_color: "#FF4057"
+  title_bracket_color: "#FF4057"
+  title_accent_text: ""
+  spectrum_enabled: false
+  particles_enabled: false
+  spectrum_y: 1740
+  tail_seconds: 0
+
+source_cleanup:
+  mask_burned_subtitle: false
+  x: 0
+  y: 1430
+  width: 1080
+  height: 125
+  clone_source_y: 1560

@@ -1,0 +1,7 @@
+interface:
+  display_name: "MP4+SRT 卡拉OK字幕"
+  short_description: "使用已校对MP4和SRT生成三行滚动卡拉OK字幕与成片"
+  brand_color: "#FF4057"
+  default_prompt: "Use $karaoke-from-mp4 with this MP4 and verified SRT to create a three-line karaoke video and transparent subtitle overlay."
+policy:
+  allow_implicit_invocation: true
