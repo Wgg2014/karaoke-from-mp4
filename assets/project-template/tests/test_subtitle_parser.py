@@ -28,14 +28,15 @@ def test_phrase_is_not_broken_in_the_middle() -> None:
     assert [item.text for item in result] == ["我确定我就是那", "一只披着羊皮的狼"]
 
 
-def test_very_long_srt_cue_is_capped_at_two_segments() -> None:
+def test_very_long_srt_cue_is_split_into_safe_length_segments() -> None:
     cue = Cue(1.0, 11.0, "这是一个非常非常长的歌词字幕需要保留全部文字并且最多只能拆分成两个连续字幕段")
     result = split_long_cues([cue], 8)
-    assert len(result) == 2
+    assert len(result) > 2
     assert "".join(item.text for item in result) == cue.text
     assert result[0].start == cue.start
-    assert result[0].end == result[1].start
-    assert result[1].end == cue.end
+    assert all(left.end == right.start for left, right in zip(result, result[1:]))
+    assert result[-1].end == cue.end
+    assert all(len(item.text) <= 8 for item in result)
 
 
 def test_enhanced_lrc_keeps_word_timing(tmp_path: Path) -> None:

@@ -21,6 +21,7 @@ Require exactly two inputs: the source MP4 and a user-verified SRT. Treat both i
 
    - `--output-dir <dir>` selects the job directory.
    - `--title "歌名"` adds a fixed title; it is disabled by default.
+   - `--font-size-scale <number>` scales the stable subtitle size. The default is `1.0`; use `0.9`, `1.1`, or `1.2` for -10%, +10%, or +20%.
    - `--preview-only` creates the ASS and both 10-second previews without full-length outputs.
    - `--ass-only` creates only the ASS after validating the SRT.
 
@@ -42,6 +43,6 @@ The transparent MOV must match the source resolution, frame rate, duration, and 
 
 ## Default design
 
-Use three lines in the lower-middle safe zone, weighted `\kf` timing between each SRT cue's start and end, Microsoft YaHei UI bold text, a heavy black outline, `#FF4057` progressive highlighting, and a 0.20-second upward transition. When one SRT cue exceeds `max_chars_per_line`, split it at the best punctuation, space, or semantic boundary into at most two consecutive timed cues; preserve every character and divide the original time proportionally. Keep spectrum, particles, title, and source-subtitle masking disabled unless explicitly requested.
+Use the stable `1080x1920-v1` style from `assets/project-template/config.yaml`: PlayRes 1080×1920, base font size 84, scale 1.0, centered Microsoft YaHei UI bold text, a heavy black outline, `#FF4057` progressive highlighting, and a 0.20-second upward transition. Keep the three-line lower-middle scrolling layout and weighted `\kf` timing. Split cues longer than eight characters at the best punctuation, space, or semantic boundary into consecutive timed cues; preserve every character and divide the original time proportionally. Scale PlayRes, font size, outline, position, and spacing exactly once for non-1080 output canvases. Do not change the stable style unless the user explicitly asks. Keep spectrum, particles, title, and source-subtitle masking disabled unless explicitly requested.
 
 For Jianying/CapCut, put the original MP4 on the main track and the transparent MOV on the track above it, align both at 00:00, do not retime the subtitle track separately, and export them together.

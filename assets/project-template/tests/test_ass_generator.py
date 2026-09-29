@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts.ass_generator import karaoke_text, generate_ass
+from scripts.ass_generator import karaoke_text, generate_ass, resolve_ass_style
 from scripts.subtitle_parser import Cue, WordTiming
 
 
@@ -28,6 +28,27 @@ def test_ass_has_three_rows_and_motion(tmp_path: Path) -> None:
     assert "Style: Next" in content
     assert "\\move(" in content
     assert "\\kf" in content
+    assert "PlayResX: 1080" in content
+    assert "PlayResY: 1920" in content
+    assert "Style: CurrentBase,Microsoft YaHei UI,84," in content
+
+
+def test_stable_style_scales_once_for_4k_vertical_video() -> None:
+    config = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
+    metrics = resolve_ass_style(config, 2160, 3840)
+    assert metrics["base_font_size"] == 84
+    assert metrics["font_size_scale"] == 1.0
+    assert metrics["font_size"] == 168
+    assert metrics["outline"] == 18
+    assert metrics["center_x"] == 1080
+    assert metrics["current_y"] == 2140
+
+
+def test_font_size_override_is_relative_to_stable_default() -> None:
+    config = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
+    assert resolve_ass_style(config, 1080, 1920, font_size_scale=0.9)["font_size"] == 76
+    assert resolve_ass_style(config, 1080, 1920, font_size_scale=1.1)["font_size"] == 92
+    assert resolve_ass_style(config, 1080, 1920, font_size_scale=1.2)["font_size"] == 101
 
 
 def test_real_word_timing_preserves_leading_pause() -> None:

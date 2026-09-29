@@ -2,7 +2,7 @@
 
 一个面向 Windows 11 的本地 Codex Skill：使用已经人工核对好的 MP4 和 SRT，生成三行滚动卡拉OK字幕、烧录版视频和带透明通道的字幕覆盖轨。
 
-本 Skill 不进行语音识别，不翻译歌词，不转换简繁体，也不会修改输入视频和 SRT。过长的单条 SRT 会在合适的语义边界拆成最多两个连续字幕段，文字不会丢失。
+本 Skill 不进行语音识别，不翻译歌词，不转换简繁体，也不会修改输入视频和 SRT。过长的单条 SRT 会在合适的语义边界拆成每段最多八个字符的连续字幕段，文字不会丢失。
 
 ## 功能
 
@@ -115,6 +115,7 @@ python "$env:USERPROFILE\.codex\skills\karaoke-from-mp4\scripts\run_karaoke.py" 
 ```text
 --output-dir <目录>   指定任务输出目录
 --title <歌名>        添加固定标题，默认关闭
+--font-size-scale <倍率> 调整稳定默认字号；0.9/1.0/1.1/1.2 分别表示 -10%/默认/+10%/+20%
 --preview-only        只生成 ASS 和两个10秒预览
 --ass-only            只验证 SRT 并生成 ASS
 ```
@@ -158,15 +159,16 @@ python "$env:USERPROFILE\.codex\skills\karaoke-from-mp4\scripts\run_karaoke.py" 
 ## 默认字幕样式
 
 - Microsoft YaHei UI 粗体；
+- 1080×1920 基准画布使用 PlayRes 1080×1920、Fontsize 84、字号倍率 1.0；
 - 当前行白色底字，逐字变为 `#FF4057`；
 - 上下行白色半透明；
 - 黑色粗描边和轻微阴影；
 - 三行位于画面中下部；
 - 切换动画约0.20秒；
-- 单条字幕过长时最多拆成两个连续时间段；
+- 水平居中，每个滚动字幕段最多八个字符，长句按语义拆成连续时间段；
 - 标题、频谱和粒子默认关闭。
 
-可以修改任务目录中的 `config.yaml` 调整字体、字号、位置、颜色、描边和动画时间。
+稳定默认配置只有一个来源：`assets/project-template/config.yaml`。启动器复制该配置但不重写它；如只需临时调整字号，优先使用 `--font-size-scale`。
 
 ## 更新
 

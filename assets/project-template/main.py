@@ -60,6 +60,73 @@ def check_environment(logger: logging.Logger) -> None:
     logger.info("环境检查通过：FFmpeg、FFprobe、libass 可用")
 
 
+def _windows_font_catalog() -> list[tuple[str, Path]]:
+    if os.name != "nt":
+        return []
+    import winreg
+
+    catalog: list[tuple[str, Path]] = []
+    registry_paths = (
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"),
+    )
+    fonts_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+    for hive, key_path in registry_paths:
+        try:
+            with winreg.OpenKey(hive, key_path) as key:
+                index = 0
+                while True:
+                    try:
+                        value_name, value_data, _ = winreg.EnumValue(key, index)
+                    except OSError:
+                        break
+                    index += 1
+                    if not isinstance(value_data, str):
+                        continue
+                    path = Path(os.path.expandvars(value_data))
+                    if not path.is_absolute():
+                        path = fonts_dir / path
+                    label = value_name.rsplit(" (", 1)[0]
+                    for face_name in (part.strip() for part in label.split(" & ")):
+                        if face_name:
+                            catalog.append((face_name, path))
+        except FileNotFoundError:
+            continue
+    return catalog
+
+
+def resolve_font(config: dict, logger: logging.Logger) -> tuple[str, Path]:
+    subtitle = config["subtitle"]
+    requested = str(subtitle["font"])
+    candidates = [requested, *(str(name) for name in subtitle.get("font_fallbacks", []))]
+    catalog = _windows_font_catalog()
+
+    for candidate_index, family in enumerate(candidates):
+        for desired_face in (f"{family} Bold", family):
+            match = next(
+                ((face, path) for face, path in catalog if face.casefold() == desired_face.casefold() and path.is_file()),
+                None,
+            )
+            if not match:
+                continue
+            face, path = match
+            if candidate_index or desired_face.casefold() != f"{requested} Bold".casefold():
+                logger.warning(
+                    "指定字体不可用或缺少粗体：%s；fallback 字体：%s；字体文件：%s",
+                    requested,
+                    face,
+                    path,
+                )
+            else:
+                logger.info("实际使用字体：%s；字体文件：%s", face, path)
+            return family, path
+
+    raise RuntimeError(
+        f"指定字体和 fallback 字体均不存在：{', '.join(candidates)}。"
+        "为避免静默替换，已停止渲染。"
+    )
+
+
 def _candidate_roots() -> list[Path]:
     roots = [ROOT, ROOT / "input"]
     return [root for root in roots if root.exists()]
@@ -323,7 +390,10 @@ def validate_alpha_mov(path: Path, expected: dict, logger: logging.Logger) -> No
     if not alpha_values:
         raise RuntimeError("Alpha 平面为空")
     alpha_min, alpha_max = min(alpha_values), max(alpha_values)
-    if alpha_min != 0 or alpha_max != 65535:
+    # ProRes 4444 stores 12-bit alpha. When FFmpeg expands it to gray16le,
+    # fully opaque samples can be reported as 65520 (4095 << 4) instead of
+    # 65535. Both values represent a complete 12-bit alpha range.
+    if alpha_min != 0 or alpha_max < 65520:
         raise RuntimeError(f"Alpha 通道无效：最小值 {alpha_min}，最大值 {alpha_max}")
     logger.info(
         "Alpha 验证通过：pix_fmt=%s，Alpha 范围=%d..%d，%s 帧，无音频",
@@ -348,25 +418,102 @@ def main() -> int:
     parser.add_argument("video", nargs="?", help="MP4 视频路径")
     parser.add_argument("subtitle", nargs="?", help="SRT/LRC/JSON 字幕路径")
     parser.add_argument("--config", default=os.fspath(ROOT / "config.yaml"))
+    parser.add_argument("--title", help="可选固定标题")
+    parser.add_argument(
+        "--font-size-scale",
+        type=float,
+        help="字幕字号倍率；默认读取 config.yaml 中的 1.0",
+    )
     parser.add_argument("--preview-only", action="store_true")
     parser.add_argument("--ass-only", action="store_true")
     args = parser.parse_args()
     logger = setup_logging()
     internal_ass_path = OUTPUT / ".内部渲染_完整样式.ass"
+    transparent_ass_path = OUTPUT / ".内部渲染_透明字幕.ass"
     try:
         check_environment(logger)
         video, subtitle = choose_inputs(args.video, args.subtitle)
         logger.info("输入视频：%s", video)
         logger.info("输入字幕：%s", subtitle)
         config = load_config(Path(args.config))
+        subtitle_config = config["subtitle"]
+        if "font_size" in subtitle_config:
+            raise RuntimeError("检测到旧版 font_size 配置；稳定版只允许使用 base_font_size")
+        required_style_keys = (
+            "stable_style_version",
+            "base_play_res_x",
+            "base_play_res_y",
+            "base_font_size",
+            "font_size_scale",
+        )
+        missing_style_keys = [key for key in required_style_keys if key not in subtitle_config]
+        if missing_style_keys:
+            raise RuntimeError("稳定字幕配置缺少字段：" + ", ".join(missing_style_keys))
+        if args.font_size_scale is not None and args.font_size_scale <= 0:
+            raise ValueError("--font-size-scale 必须大于 0")
+        if args.title:
+            title = args.title.strip("《》")
+            config["decorations"]["title"] = f"《{title}》"
+            config["decorations"]["title_enabled"] = True
+
+        resolved_font, font_path = resolve_font(config, logger)
+        output_width = int(config["output"]["width"])
+        output_height = int(config["output"]["height"])
         cues = parse_subtitle(subtitle)
-        cues = split_long_cues(cues, int(config["subtitle"].get("max_chars_per_line", 14)))
+        cues = split_long_cues(cues, int(subtitle_config["max_chars_per_line"]))
         ass_path = OUTPUT / "三行卡拉OK字幕.ass"
-        generate_ass(cues, config, ass_path, include_decorations=False)
+        metrics = generate_ass(
+            cues,
+            config,
+            ass_path,
+            include_decorations=False,
+            play_res=(output_width, output_height),
+            font_size_scale=args.font_size_scale,
+            font_name=resolved_font,
+        )
+        logger.info(
+            "稳定字幕配置：version=%s；最终视频分辨率=%dx%d；PlayResX=%d；PlayResY=%d；"
+            "base_font_size=%d；font_size_scale=%g；最终 Fontsize=%d",
+            subtitle_config["stable_style_version"],
+            output_width,
+            output_height,
+            metrics["play_res_x"],
+            metrics["play_res_y"],
+            metrics["base_font_size"],
+            metrics["font_size_scale"],
+            metrics["font_size"],
+        )
+        logger.info("字幕字体：%s；字体文件路径：%s", resolved_font, font_path)
+        logger.info("每个滚动字幕段最多 %d 个字符；水平中心 x=%d", subtitle_config["max_chars_per_line"], metrics["center_x"])
         logger.info("已生成 ASS：%s（%d 个歌词段）", ass_path, len(cues))
         if args.ass_only:
             return 0
-        generate_ass(cues, config, internal_ass_path, include_decorations=True)
+        generate_ass(
+            cues,
+            config,
+            internal_ass_path,
+            include_decorations=True,
+            play_res=(output_width, output_height),
+            font_size_scale=args.font_size_scale,
+            font_name=resolved_font,
+        )
+        source_spec = source_video_spec(video)
+        transparent_metrics = generate_ass(
+            cues,
+            config,
+            transparent_ass_path,
+            include_decorations=False,
+            play_res=(source_spec["width"], source_spec["height"]),
+            font_size_scale=args.font_size_scale,
+            font_name=resolved_font,
+        )
+        logger.info(
+            "透明轨字幕画布：PlayResX=%d；PlayResY=%d；最终 Fontsize=%d；描边=%g",
+            transparent_metrics["play_res_x"],
+            transparent_metrics["play_res_y"],
+            transparent_metrics["font_size"],
+            transparent_metrics["outline"],
+        )
         preview_path = OUTPUT / "歌词预览_10秒.mp4"
         render(video, internal_ass_path, preview_path, config, logger, preview=True)
         validate_media(preview_path, float(config["output"].get("preview_seconds", 10)))
@@ -374,7 +521,7 @@ def main() -> int:
         transparent_preview_path = OUTPUT / "透明卡拉OK字幕_10秒预览.mov"
         transparent_preview_spec = render_transparent(
             video,
-            ass_path,
+            transparent_ass_path,
             transparent_preview_path,
             logger,
             preview_seconds=float(config["output"].get("preview_seconds", 10)),
@@ -387,7 +534,7 @@ def main() -> int:
             validate_media(final_path)
             logger.info("烧录版最终视频技术检查通过")
             transparent_path = OUTPUT / "透明卡拉OK字幕.mov"
-            transparent_spec = render_transparent(video, ass_path, transparent_path, logger)
+            transparent_spec = render_transparent(video, transparent_ass_path, transparent_path, logger)
             validate_alpha_mov(transparent_path, transparent_spec, logger)
             logger.info("完整透明字幕 MOV 技术检查通过")
         return 0
@@ -396,8 +543,9 @@ def main() -> int:
         print(f"\n错误：{exc}", file=sys.stderr)
         return 1
     finally:
-        if internal_ass_path.exists():
-            internal_ass_path.unlink()
+        for temporary_ass in (internal_ass_path, transparent_ass_path):
+            if temporary_ass.exists():
+                temporary_ass.unlink()
 
 
 if __name__ == "__main__":

@@ -8,23 +8,30 @@ output:
   prefer_hardware: true
 
 subtitle:
+  stable_style_version: "1080x1920-v1"
+  base_play_res_x: 1080
+  base_play_res_y: 1920
+  base_font_size: 84
+  font_size_scale: 1.0
   timing_mode: weighted
   enable_three_line_scroll: true
   transition_seconds: 0.20
-  max_chars_per_line: 14
+  max_chars_per_line: 8
   font: Microsoft YaHei UI
-  font_size: 60
-  outline: 7
+  font_fallbacks:
+    - Microsoft YaHei
+    - SimHei
+  outline: 9
   shadow: 2
   normal_color: "#FFFFFF"
   current_color: "#FF4057"
   previous_opacity: 0.72
   next_opacity: 0.90
-  center_x: 465
-  previous_y: 1050
-  current_y: 1195
-  next_y: 1340
-  line_spacing: 145
+  center_x: 540
+  previous_y: 910
+  current_y: 1070
+  next_y: 1230
+  line_spacing: 160
 
 decorations:
   title: ""

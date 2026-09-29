@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import shutil
 import subprocess
@@ -70,65 +69,6 @@ def copy_template(job_dir: Path) -> None:
     (job_dir / "output").mkdir(parents=True, exist_ok=True)
 
 
-def write_config(job_dir: Path, title: str | None) -> None:
-    title_value = json.dumps(f"《{title.strip('《》')}》" if title else "", ensure_ascii=False)
-    config = f'''output:
-  width: 1080
-  height: 1920
-  preview_seconds: 10
-  preview_video_bitrate: 1800k
-  final_crf: 18
-  audio_bitrate: 192k
-  prefer_hardware: true
-
-subtitle:
-  timing_mode: weighted
-  enable_three_line_scroll: true
-  transition_seconds: 0.20
-  max_chars_per_line: 14
-  font: Microsoft YaHei UI
-  font_size: 60
-  outline: 7
-  shadow: 2
-  normal_color: "#FFFFFF"
-  current_color: "#FF4057"
-  previous_opacity: 0.72
-  next_opacity: 0.90
-  center_x: 465
-  previous_y: 1050
-  current_y: 1195
-  next_y: 1340
-  line_spacing: 145
-
-decorations:
-  title: {title_value}
-  subtitle: ""
-  title_enabled: {str(bool(title)).lower()}
-  title_font: Microsoft YaHei UI
-  title_size: 72
-  title_y: 500
-  subtitle_size: 36
-  subtitle_y: 610
-  title_normal_color: "#FFFFFF"
-  title_accent_color: "#FF4057"
-  title_bracket_color: "#FF4057"
-  title_accent_text: ""
-  spectrum_enabled: false
-  particles_enabled: false
-  spectrum_y: 1740
-  tail_seconds: 0
-
-source_cleanup:
-  mask_burned_subtitle: false
-  x: 0
-  y: 1430
-  width: 1080
-  height: 125
-  clone_source_y: 1560
-'''
-    (job_dir / "config.yaml").write_text(config, encoding="utf-8")
-
-
 def runtime_python() -> Path:
     runtime = cache_root() / "runtime"
     python_path = runtime / "Scripts" / "python.exe"
@@ -146,13 +86,25 @@ def runtime_python() -> Path:
     return python_path
 
 
-def render_job(job_dir: Path, video: Path, srt: Path, preview_only: bool, ass_only: bool) -> None:
+def render_job(
+    job_dir: Path,
+    video: Path,
+    srt: Path,
+    preview_only: bool,
+    ass_only: bool,
+    title: str | None,
+    font_size_scale: float | None,
+) -> None:
     python_path = runtime_python()
     command = [os.fspath(python_path), os.fspath(job_dir / "main.py"), os.fspath(video), os.fspath(srt)]
     if preview_only:
         command.append("--preview-only")
     if ass_only:
         command.append("--ass-only")
+    if title:
+        command += ["--title", title]
+    if font_size_scale is not None:
+        command += ["--font-size-scale", str(font_size_scale)]
     proc = run(command, cwd=job_dir)
     if proc.returncode != 0:
         raise RuntimeError(f"字幕渲染失败，请检查：{job_dir / 'output' / '处理日志.log'}")
@@ -164,6 +116,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("subtitle", help="已人工核对的 SRT")
     parser.add_argument("--output-dir", help="任务输出目录；非空目录会自动改用带时间戳的新目录")
     parser.add_argument("--title", help="可选固定标题")
+    parser.add_argument(
+        "--font-size-scale",
+        type=float,
+        help="字幕字号倍率；默认读取稳定配置（1.0），例如 0.9、1.1、1.2",
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--preview-only", action="store_true")
     mode.add_argument("--ass-only", action="store_true")
@@ -180,9 +137,10 @@ def main() -> int:
         if not subtitle.is_file() or subtitle.suffix.lower() != ".srt":
             raise FileNotFoundError(f"输入字幕必须是存在的 SRT：{subtitle}")
         require_tools()
+        if args.font_size_scale is not None and args.font_size_scale <= 0:
+            raise ValueError("--font-size-scale 必须大于 0")
         job_dir = unique_job_dir(video, args.output_dir)
         copy_template(job_dir)
-        write_config(job_dir, args.title)
         copied_srt = job_dir / "input" / subtitle.name
         shutil.copy2(subtitle, copied_srt)
         if copied_srt.read_bytes() != subtitle.read_bytes():
@@ -190,7 +148,15 @@ def main() -> int:
         print(f"输入视频：{video}")
         print(f"输入字幕：{subtitle}")
         print("歌词处理：原样保留，不听写、不翻译、不转换简繁体")
-        render_job(job_dir, video, copied_srt, args.preview_only, args.ass_only)
+        render_job(
+            job_dir,
+            video,
+            copied_srt,
+            args.preview_only,
+            args.ass_only,
+            args.title,
+            args.font_size_scale,
+        )
         print(f"任务完成：{job_dir}")
         return 0
     except KeyboardInterrupt:

@@ -140,22 +140,34 @@ def _split_text(text: str, limit: int) -> list[str]:
     text = re.sub(r"\s+", " ", text).strip()
     if len(text) <= limit:
         return [text]
-    target = len(text) / 2
-    minimum = max(1, min(4, len(text) // 4))
-    candidates = range(minimum, len(text) - minimum + 1)
 
-    def score(pos: int) -> float:
-        left = text[pos - 1]
-        right = text[pos] if pos < len(text) else ""
-        boundary = 8 if left in _BREAK_CHARS else 1.5 if left in _SOFT_BREAK_AFTER else 0
-        if right in _BREAK_CHARS:
-            boundary += 5
-        if any(text.startswith(phrase, pos) for phrase in _PHRASE_STARTS):
-            boundary += 7
-        return boundary - abs(pos - target)
+    parts: list[str] = []
+    pending = [text]
+    while pending:
+        segment = pending.pop(0)
+        if len(segment) <= limit:
+            parts.append(segment)
+            continue
+        target = min(limit, len(segment) / 2)
+        candidates = range(1, min(limit, len(segment) - 1) + 1)
 
-    cut = max(candidates, key=score)
-    return [text[:cut].strip(), text[cut:].strip()]
+        def score(pos: int) -> float:
+            left = segment[pos - 1]
+            right = segment[pos] if pos < len(segment) else ""
+            boundary = 8 if left in _BREAK_CHARS else 1.5 if left in _SOFT_BREAK_AFTER else 0
+            if right in _BREAK_CHARS:
+                boundary += 5
+            if any(segment.startswith(phrase, pos) for phrase in _PHRASE_STARTS):
+                boundary += 7
+            return boundary - abs(pos - target)
+
+        cut = max(candidates, key=score)
+        left, right = segment[:cut].strip(), segment[cut:].strip()
+        if left:
+            parts.append(left)
+        if right:
+            pending.insert(0, right)
+    return parts
 
 
 def split_long_cues(cues: Iterable[Cue], limit: int) -> list[Cue]:

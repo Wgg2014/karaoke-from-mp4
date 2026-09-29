@@ -88,28 +88,89 @@ def _dialogue(layer: int, start: float, end: float, style: str, text: str) -> st
     return f"Dialogue: {layer},{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,{text}"
 
 
-def generate_ass(cues: list[Cue], config: dict, destination: Path, include_decorations: bool = True) -> None:
+def resolve_ass_style(
+    config: dict,
+    play_res_x: int,
+    play_res_y: int,
+    *,
+    font_size_scale: float | None = None,
+    font_name: str | None = None,
+) -> dict:
+    """Resolve the stable 1080x1920 style once for a target ASS canvas."""
     sub = config["subtitle"]
+    base_x = int(sub["base_play_res_x"])
+    base_y = int(sub["base_play_res_y"])
+    base_font_size = int(sub["base_font_size"])
+    configured_scale = float(sub["font_size_scale"])
+    requested_scale = configured_scale if font_size_scale is None else float(font_size_scale)
+    if min(base_x, base_y, play_res_x, play_res_y) <= 0:
+        raise ValueError("ASS PlayRes 和基准画布尺寸必须大于 0")
+    if requested_scale <= 0:
+        raise ValueError("font_size_scale 必须大于 0")
+
+    scale_x = play_res_x / base_x
+    scale_y = play_res_y / base_y
+    style_scale = scale_x * requested_scale
+    return {
+        "play_res_x": int(play_res_x),
+        "play_res_y": int(play_res_y),
+        "base_play_res_x": base_x,
+        "base_play_res_y": base_y,
+        "base_font_size": base_font_size,
+        "font_size_scale": requested_scale,
+        "font_size": max(1, int(round(base_font_size * style_scale))),
+        "font": font_name or str(sub["font"]),
+        "outline": round(float(sub["outline"]) * style_scale, 3),
+        "shadow": round(float(sub["shadow"]) * style_scale, 3),
+        "center_x": int(round(int(sub["center_x"]) * scale_x)),
+        "previous_y": int(round(int(sub["previous_y"]) * scale_y)),
+        "current_y": int(round(int(sub["current_y"]) * scale_y)),
+        "next_y": int(round(int(sub["next_y"]) * scale_y)),
+        "line_spacing": int(round(int(sub["line_spacing"]) * scale_y)),
+        "scale_x": scale_x,
+        "scale_y": scale_y,
+        "style_scale": style_scale,
+    }
+
+
+def generate_ass(
+    cues: list[Cue],
+    config: dict,
+    destination: Path,
+    include_decorations: bool = True,
+    *,
+    play_res: tuple[int, int] | None = None,
+    font_size_scale: float | None = None,
+    font_name: str | None = None,
+) -> dict:
     output = config["output"]
+    width, height = play_res or (int(output["width"]), int(output["height"]))
+    metrics = resolve_ass_style(
+        config,
+        width,
+        height,
+        font_size_scale=font_size_scale,
+        font_name=font_name,
+    )
+    sub = config["subtitle"]
     decor = config.get("decorations", {})
-    width, height = int(output["width"]), int(output["height"])
-    font = sub["font"]
-    font_size = int(sub["font_size"])
-    outline = float(sub["outline"])
-    shadow = float(sub["shadow"])
+    font = metrics["font"]
+    font_size = metrics["font_size"]
+    outline = metrics["outline"]
+    shadow = metrics["shadow"]
     current = _ass_color(sub["current_color"])
     white = _ass_color(sub["normal_color"])
     previous = _ass_color(sub["normal_color"], float(sub["previous_opacity"]))
     following = _ass_color(sub["normal_color"], float(sub["next_opacity"]))
-    x = int(sub["center_x"])
-    y_prev, y_cur, y_next = (int(sub[key]) for key in ("previous_y", "current_y", "next_y"))
-    spacing = int(sub["line_spacing"])
+    x = metrics["center_x"]
+    y_prev, y_cur, y_next = (metrics[key] for key in ("previous_y", "current_y", "next_y"))
+    spacing = metrics["line_spacing"]
     transition_ms = int(round(float(sub["transition_seconds"]) * 1000))
     scroll = bool(sub.get("enable_three_line_scroll", True))
     mode = sub.get("timing_mode", "weighted")
     title_font = decor.get("title_font", "KaiTi")
-    title_size = int(decor.get("title_size", 70))
-    note_size = int(decor.get("subtitle_size", 34))
+    title_size = max(1, int(round(int(decor.get("title_size", 70)) * metrics["style_scale"])))
+    note_size = max(1, int(round(int(decor.get("subtitle_size", 34)) * metrics["style_scale"])))
 
     header = f"""[Script Info]
 Title: Three-line karaoke subtitles
@@ -147,10 +208,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             rf"{{\1c{_override_color(decor.get('title_normal_color', '#111111'))}}}{_escape(prefix_body)}"
             rf"{{\1c{_override_color(decor.get('title_accent_color', '#E6292F'))}}}{_escape(suffix)}"
         )
-        title_y = int(decor.get("title_y", 485))
+        title_y = int(round(int(decor.get("title_y", 485)) * metrics["scale_y"]))
         events.append(_dialogue(0, 0, total_end, "Title", rf"{{\pos({width // 2},{title_y})}}{title_markup}"))
         if decor.get("subtitle"):
-            note_y = int(decor.get("subtitle_y", 610))
+            note_y = int(round(int(decor.get("subtitle_y", 610)) * metrics["scale_y"]))
             events.append(_dialogue(0, 0, total_end, "Note", rf"{{\pos({width // 2},{note_y})}}{_escape(str(decor['subtitle']))}"))
     if include_decorations and decor.get("particles_enabled", False):
         cycle = 0.0
@@ -196,3 +257,4 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             events.append(_dialogue(1, start, end, "Next", rf"{{{motion}}}{next2_text}"))
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(header + "\n".join(events) + "\n", encoding="utf-8-sig")
+    return metrics
